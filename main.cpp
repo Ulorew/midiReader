@@ -2,12 +2,17 @@
 #include <vector>
 #include <fstream>
 #include <string>
+#include <windows.h>
 #include <cstdio>
+#include <math.h>
+#include <algorithm>
 
 //#define byte int8_t;
 
 using namespace std;
 
+vector<double>freq(128);
+vector<string>noteNames={"��","��#","��","��#","��","��","��#","����","����#","��","��#","��"};
 
 string readStr4(ifstream &in) {
     string r = "";
@@ -33,132 +38,176 @@ uint16_t readShort(ifstream &in) {
     return uint16_t((unsigned char) (buffer[0]) << 8 | (unsigned char) (buffer[1]));
 }
 
+struct Note {
+    int time = 0;
+    int freq = 0;
+    bool pressed = false;
+    int num = 0;
+    int vol = 0;
+    int channel = 0;
 
-// Назначение: копирование блока MTrk (блок с событиями) из MIDI файла.
-// Параметры: поток для чтения MIDI файла.
-// Возвращает: структуру блока с массивом структур событий.
+};
+
+vector<vector<Note>> blocks;
+
+bool timecmp(Note a, Note b){
+    return a.time<b.time;
+}
+
+Note tNote;
+
 void readDataBlock(ifstream &in) {
+    vector<Note> cblock;
     string nameSection = readStr4(in);
-    uint32_t lengthSection = readInt(in); // 4 байта длинны всего блока.
-    uint32_t LoopIndex = lengthSection; // Копируем колличество оставшихся ячеек. Будем считывать события, пока счетчик не будет = 0.
-    uint32_t realTime = 0; // Реальное время внутри блока.
-    while (LoopIndex != 0) // Пока не считаем все события.
+    uint32_t lengthSection = readInt(in); // 4 ???? ?????? ??? ?????.
+    uint32_t LoopIndex = lengthSection; // ?????? ???????? ??????? ???. ??? ?????? ????, ???? ???? ?? ??? = 0.
+    uint32_t realTime = 0; // ?????? ??? ????? ?????.
+    while (LoopIndex != 0) // ???? ?? ???? ?? ????.
     {
 
 
-        // Время описывается плавающим числом байт. Конечный байт не имеет 8-го разрядка справа (самого старшего).
-        int loopСount = 0; // Колличество считанных байт.
-        uint8_t buffer; // Сюда кладем считанное значение.
-        uint32_t bufferTime = 0; // Считанное время помещаем сюда.
+        // ??? ????????? ??????? ??? ????. ?????? ???? ?? ????? 8-?? ???? ??? (???? ?????).
+        int loopCount = 0; // ???????? ?????? ????.
+        uint8_t buffer; // ?? ?????? ?????? ??????.
+        uint32_t bufferTime = 0; // ?????? ??? ?????? ??.
         do {
-            buffer = in.get(); // Читаем значение.
-            loopСount++; // Показываем, что считали байт.
-            bufferTime <<= 7; // Сдвигаем на 7 байт влево существующее значенеи времени (Т.к. 1 старший байт не используется).
+            buffer = in.get(); // ???? ??????.
+            loopCount++; // ????????, ?? ???? ????.
+            bufferTime <<= 7; // ???????? ?? 7 ???? ????? ???????? ?????? ????? (?.?. 1 ???? ???? ?? ????????).
             bufferTime |= uint8_t(
-                    uint8_t(buffer) & uint8_t(0x7F)); // На сдвинутый участок накладываем существующее время.
-        } while ((buffer & (1 << 7)) != 0); // Выходим, как только прочитаем последний байт времени (старший бит = 0).
-        realTime += bufferTime; // Получаем реальное время.
+                    uint8_t(buffer) & uint8_t(0x7F)); // ?? ?????? ???? ????????? ???????? ???.
+        } while ((buffer & (1 << 7)) != 0); // ?????, ??? ?? ????? ??????? ???? ????? (???? ??? = 0).
+        realTime += bufferTime; // ?????? ???? ???.
 
         buffer = in.get();
-        loopСount++; // Считываем статус-байт, показываем, что считали байт.
-        // Если у нас мета-события, то...
+        loopCount++; // ?????? ?????-????, ????????, ?? ???? ????.
+        // ?? ? ??? ???-????, ?...
         if (buffer == 0xFF) {
-            buffer = in.get();  // Считываем номер мета-события.
-            buffer = in.get();  // Считываем длину.
-            loopСount += 2;
+            buffer = in.get();  // ?????? ????? ???-????.
+            buffer = in.get();  // ?????? ?????.
+            loopCount += 2;
             for (int loop = 0; loop < buffer; loop++)
                 in.get();
-            LoopIndex = LoopIndex - loopСount - buffer; // Отнимаем от счетчика длинну считанного.
+            LoopIndex = LoopIndex - loopCount - buffer; // ?????? ?? ????? ?????? ???????.
         }
 
-            // Если не мета-событие, то смотрим, является ли событие событием первого уровня.
+            // ?? ?? ???-???, ? ???, ????? ?? ??? ???? ????? ????.
         else
-            switch ((int8_t) buffer & 0xF0) // Смотрим по старшым 4-м байтам.
+            switch ((int8_t) buffer & 0xF0) // ????? ?? ????? 4-? ????.
             {
-                // Перебираем события первого уровня.
+                // ?????? ???? ????? ????.
 
-                case 0x80: // Снять клавишу.
-                    bufferSTNote.channelNote = (byte) (buffer & 0x0F); // Копируем номер канала.
-                    bufferSTNote.flagNote = false; // Мы отпускаем клавишу.
-                    bufferSTNote.roomNotes = MIDIFile.ReadByte(); // Копируем номер ноты.
-                    bufferSTNote.dynamicsNote = MIDIFile.ReadByte(); // Копируем динамику ноты.
-                    bufferSTNote.noteTime = realTime; // Присваеваем реальное время ноты.
-                    ST.arrayNoteStruct.Add(bufferSTNote); // Сохраняем новую структуру.
-                    LoopIndex = LoopIndex - loopСount - 2; // Отнимаем прочитанное.
+                case 0x80: // ????? ???????
+                    tNote.channel = (buffer & 0x0F); // ?????? ????? ??????.
+                    tNote.pressed = false; // ?? ?????? ???????.
+                    tNote.num = in.get();
+                    tNote.vol = in.get();
+                    tNote.time = realTime; // ???????? ???? ??? ????.
+                    cblock.push_back(tNote);
+                    LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
-                case 0x90:   // Нажать клавишу.
-                    bufferSTNote.channelNote = (byte) (buffer & 0x0F); // Копируем номер канала.
-                    bufferSTNote.flagNote = true; // Мы нажимаем.
-                    bufferSTNote.roomNotes = MIDIFile.ReadByte(); // Копируем номер ноты.
-                    bufferSTNote.dynamicsNote = MIDIFile.ReadByte(); // Копируем динамику ноты.
-                    bufferSTNote.noteTime = realTime; // Присваеваем реальное время ноты.
-                    ST.arrayNoteStruct.Add(bufferSTNote); // Сохраняем новую структуру.
-                    LoopIndex = LoopIndex - loopСount - 2; // Отнимаем прочитанное.
+                case 0x90:   // ?????? ???????.
+
+                    tNote.channel = (buffer & 0x0F); // ?????? ????? ??????.
+                    tNote.pressed = true; // ?? ????????.
+                    tNote.num = in.get(); // ?????? ????? ????.
+                    tNote.vol = in.get(); // ?????? ???????? ????.
+                    tNote.time = realTime;  // ???????? ???? ??? ????.
+                    cblock.push_back(tNote); // ????? ????? ????????.
+                    LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
-                case 0xA0:  // Сменить силу нажатия клавишы.
-                    bufferSTNote.channelNote = (byte) (buffer & 0x0F); // Копируем номер канала.
-                    bufferSTNote.flagNote = true; // Мы нажимаем.
-                    bufferSTNote.roomNotes = MIDIFile.ReadByte(); // Копируем номер ноты.
-                    bufferSTNote.dynamicsNote = MIDIFile.ReadByte(); // Копируем НОВУЮ динамику ноты.
-                    bufferSTNote.noteTime = realTime; // Присваеваем реальное время ноты.
-                    ST.arrayNoteStruct.Add(bufferSTNote); // Сохраняем новую структуру.
-                    LoopIndex = LoopIndex - loopСount - 2; // Отнимаем прочитанное.
+                case 0xA0:  // ??????? ?? ?????? ???????.
+                    tNote.channel = (buffer & 0x0F); // ?????? ????? ??????.
+                    tNote.pressed = true; // ?? ????????.
+                    tNote.num = in.get(); // ?????? ????? ????.
+                    tNote.vol = in.get(); // ?????? ????? ???????? ????.
+                    tNote.time = realTime; // ???????? ???? ??? ????.
+                    cblock.push_back(tNote);  // ????? ????? ????????.
+                    LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
-                    // Если 2-х байтовая комманда.
-                case 0xB0:
-                    byte buffer2level = MIDIFile.ReadByte(); // Читаем саму команду.
-                    switch (buffer2level) // Смотрим команды второго уровня.
+                    // ?? 2-? ?????? ????????.
+                case 0xB0: {
+                    uint8_t buffer2level = in.get();  // ???? ?? ???????.
+                    in.get();  // ?????? ?????? ?????-? ????????? ???.
+                    LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
+                    /*switch (buffer2level) // ????? ??????? ???? ????.
                     {
-                        default: // Для определения новых комманд (не описаных).
-                            MIDIFile.ReadByte(); // Считываем параметр какой-то неизвестной функции.
-                            LoopIndex = LoopIndex - loopСount - 2; // Отнимаем прочитанное.
+                        //default:  ??? ????????? ????? ??????? (?? ??????).
+                            in.get();  // ?????? ?????? ?????-? ????????? ???.
+                            LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                             break;
-                    }
+                    }*/
+                };
                     break;
 
-                    // В случае попадания их просто нужно считать.
-                case 0xC0:   // Просто считываем байт номера.
-                    MIDIFile.ReadByte(); // Считываем номер программы.
-                    LoopIndex = LoopIndex - loopСount - 1; // Отнимаем прочитанное.
+                    // ? ??? ????????? ?? ???? ??? ?????.
+                case 0xC0:   // ???? ?????? ???? ?????.
+                    in.get();  // ?????? ????? ?????.
+                    LoopIndex = LoopIndex - loopCount - 1; // ?????? ???????.
                     break;
 
-                case 0xD0:   // Сила канала.
-                    MIDIFile.ReadByte(); // Считываем номер программы.
-                    LoopIndex = LoopIndex - loopСount - 1; // Отнимаем прочитанное.
+                case 0xD0:   // ???? ??????.
+                    in.get();  // ?????? ????? ?????.
+                    LoopIndex = LoopIndex - loopCount - 1; // ?????? ???????.
                     break;
 
-                case 0xE0:  // Вращения звуковысотного колеса.
-                    MIDIFile.ReadBytes(2); // Считываем номер программы.
-                    LoopIndex = LoopIndex - loopСount - 2; // Отнимаем прочитанное.
+                case 0xE0:  // ????? ????????? ?????.
+                    in.get();
+                    in.get();
+                    LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
             }
     }
-    return ST; // Возвращаем заполненную структуру.
+    blocks.push_back(cblock);
 }
 
 void loadMidi(string filename) {
     ifstream in(filename);
 
     int infoSize, fileType, blockCnt, timeFormat;
-
+    readStr4(in);
     infoSize = readInt(in);
     fileType = readShort(in);
     blockCnt = readShort(in);
     timeFormat = readShort(in);
     char c;
+
+    for (int bn=0;bn<blockCnt;++bn)
+        readDataBlock(in);
     while ((c = in.get()) != EOF) {
         cout << hex << c + 0 << ' ';
     }
-    cout << "\nEOF\n";
     in.close();
+    for (auto &i:blocks)
+        sort(i.begin(),i.end(), timecmp);
+    for (auto &i:blocks){
+        for (auto j:i)
+            cout << noteNames[j.num%12] << ' ';
+        cout << '\n';
+
+
+    }
 
 
 }
 
-
+// A 81 prob 57
 int main() {
+
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
+    double step=pow(2,1.0/12.0);
+    freq[57]=440;
+    for (int i=58;i<57+12;++i)
+        freq[i]=freq[i-1]*step;
+    for (int i=57+12;i<128;++i)
+        freq[i]=freq[i-12]*2;
+    for (int i=56;i>=0;--i)
+        freq[i]=freq[i+12]/2;
+
+
     //loadMidi("test1.mid");
-    loadMidi("D:\\Programming\\VS_CPP\\RandomThings\\midiReader\\test1.mid");
+    loadMidi("D:\\Programming\\VS_CPP\\RandomThings\\midiReader\\test2.mid");
 
 
     return 0;

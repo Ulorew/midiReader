@@ -11,8 +11,8 @@
 
 using namespace std;
 
-vector<double>freq(128);
-vector<string>noteNames={"Äî","Äî#","Ðå","Ðå#","Ìè","Ôà","Ôà#","Ñîëü","Ñîëü#","Ëÿ","Ëÿ#","Ñè"};
+vector<double> freq(128);
+vector<string> noteNames = {"Äî", "Äî#", "Ðå", "Ðå#", "Ìè", "Ôà", "Ôà#", "Ñîëü", "Ñîëü#", "Ëÿ", "Ëÿ#", "Ñè"};
 
 string readStr4(ifstream &in) {
     string r = "";
@@ -38,26 +38,38 @@ uint16_t readShort(ifstream &in) {
     return uint16_t((unsigned char) (buffer[0]) << 8 | (unsigned char) (buffer[1]));
 }
 
-struct Note {
+struct NoteEv {
     int time = 0;
     int freq = 0;
     bool pressed = false;
     int num = 0;
     int vol = 0;
     int channel = 0;
-
 };
 
-vector<vector<Note>> blocks;
+struct Note {
+    double freq = 0;
+    int dur = 1;
 
-bool timecmp(Note a, Note b){
-    return a.time<b.time;
+    Note(double freq, int dur) {
+        this->freq = freq;
+        this->dur = dur;
+    }
+};
+
+vector<vector<NoteEv>> blocks;
+
+bool timecmp(NoteEv a, NoteEv b) {
+    if (a.time != b.time)
+        return a.time < b.time;
+    else
+        return a.pressed < b.pressed;
 }
 
-Note tNote;
+NoteEv tNoteEv;
 
 void readDataBlock(ifstream &in) {
-    vector<Note> cblock;
+    vector<NoteEv> cblock;
     string nameSection = readStr4(in);
     uint32_t lengthSection = readInt(in); // 4 ???? ?????? ??? ?????.
     uint32_t LoopIndex = lengthSection; // ?????? ???????? ??????? ???. ??? ?????? ????, ???? ???? ?? ??? = 0.
@@ -98,31 +110,34 @@ void readDataBlock(ifstream &in) {
                 // ?????? ???? ????? ????.
 
                 case 0x80: // ????? ???????
-                    tNote.channel = (buffer & 0x0F); // ?????? ????? ??????.
-                    tNote.pressed = false; // ?? ?????? ???????.
-                    tNote.num = in.get();
-                    tNote.vol = in.get();
-                    tNote.time = realTime; // ???????? ???? ??? ????.
-                    cblock.push_back(tNote);
+                    tNoteEv.channel = (buffer & 0x0F); // ?????? ????? ??????.
+                    tNoteEv.pressed = false; // ?? ?????? ???????.
+                    tNoteEv.num = in.get();
+                    tNoteEv.vol = in.get();
+                    tNoteEv.time = realTime; // ???????? ???? ??? ????.
+                    tNoteEv.freq = freq[tNoteEv.num];
+                    cblock.push_back(tNoteEv);
                     LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
                 case 0x90:   // ?????? ???????.
 
-                    tNote.channel = (buffer & 0x0F); // ?????? ????? ??????.
-                    tNote.pressed = true; // ?? ????????.
-                    tNote.num = in.get(); // ?????? ????? ????.
-                    tNote.vol = in.get(); // ?????? ???????? ????.
-                    tNote.time = realTime;  // ???????? ???? ??? ????.
-                    cblock.push_back(tNote); // ????? ????? ????????.
+                    tNoteEv.channel = (buffer & 0x0F); // ?????? ????? ??????.
+                    tNoteEv.pressed = true; // ?? ????????.
+                    tNoteEv.num = in.get(); // ?????? ????? ????.
+                    tNoteEv.vol = in.get(); // ?????? ???????? ????.
+                    tNoteEv.time = realTime;  // ???????? ???? ??? ????.
+                    tNoteEv.freq = freq[tNoteEv.num];
+                    cblock.push_back(tNoteEv); // ????? ????? ????????.
                     LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
                 case 0xA0:  // ??????? ?? ?????? ???????.
-                    tNote.channel = (buffer & 0x0F); // ?????? ????? ??????.
-                    tNote.pressed = true; // ?? ????????.
-                    tNote.num = in.get(); // ?????? ????? ????.
-                    tNote.vol = in.get(); // ?????? ????? ???????? ????.
-                    tNote.time = realTime; // ???????? ???? ??? ????.
-                    cblock.push_back(tNote);  // ????? ????? ????????.
+                    tNoteEv.channel = (buffer & 0x0F); // ?????? ????? ??????.
+                    tNoteEv.pressed = true; // ?? ????????.
+                    tNoteEv.num = in.get(); // ?????? ????? ????.
+                    tNoteEv.vol = in.get(); // ?????? ????? ???????? ????.
+                    tNoteEv.time = realTime; // ???????? ???? ??? ????.
+                    tNoteEv.freq = freq[tNoteEv.num];
+                    cblock.push_back(tNoteEv);  // ????? ????? ????????.
                     LoopIndex = LoopIndex - loopCount - 2; // ?????? ???????.
                     break;
                     // ?? 2-? ?????? ????????.
@@ -161,6 +176,48 @@ void readDataBlock(ifstream &in) {
     blocks.push_back(cblock);
 }
 
+vector<vector<Note>> melody;
+
+void calcNoteDurations() {
+
+    melody.resize(blocks.size());
+
+    /*vector<int> downTime(1 << 16);
+    for (int i = 0; i < blocks.size(); ++i)
+        for (auto &j: blocks[i])
+            if (j.pressed)
+                downTime[j.num] = j.time;
+            else
+                melody[i].push_back(Note(freq[j.num],j.time-downTime[j.num]));*/
+    for (int i = 0; i < blocks.size(); ++i) {
+        for (int j = 0; j < int(blocks[i].size()) - 2; ++j)
+            if (blocks[i][j].pressed)
+                melody[i].push_back(Note(blocks[i][j].freq, blocks[i][j + 2].time - blocks[i][j].time));
+        if (blocks[i].size() > 0)
+            melody[i].push_back(
+                    Note(blocks[i].back().freq, blocks[i].back().time - blocks[i][blocks[i].size() - 2].time));
+    }
+
+
+}
+
+double speedUpMelody(double mult) {
+    for (auto &i: melody)
+        for (auto &j: i)
+            j.dur /= mult;
+}
+
+void saveMelody(string filename, int channel) {
+    auto notes = &melody[channel];
+    ofstream out(filename);
+    for (auto &i: *notes) {
+        out << "M300 S" << int(i.freq) << " P" << i.dur << '\n';
+        cout << "M300 S" << int(i.freq) << " P" << i.dur << '\n';
+    }
+    out.close();
+
+}
+
 void loadMidi(string filename) {
     ifstream in(filename);
 
@@ -172,21 +229,30 @@ void loadMidi(string filename) {
     timeFormat = readShort(in);
     char c;
 
-    for (int bn=0;bn<blockCnt;++bn)
+    for (int bn = 0; bn < blockCnt; ++bn)
         readDataBlock(in);
     while ((c = in.get()) != EOF) {
         cout << hex << c + 0 << ' ';
     }
     in.close();
-    for (auto &i:blocks)
-        sort(i.begin(),i.end(), timecmp);
-    for (auto &i:blocks){
-        for (auto j:i)
-            cout << noteNames[j.num%12] << ' ';
-        cout << '\n';
-
-
+    for (auto &i: blocks)
+        sort(i.begin(), i.end(), timecmp);
+    calcNoteDurations();
+    cout << "Events :\n";
+    for (int i=0;i<blocks.size();++i) {
+        cout << "Channel " << i + 1 << ":\n";
+        for (auto j: blocks[i])
+            cout << "(" << j.freq << " - " << j.time << ") ";
+        cout << "\n";
     }
+    cout << "\nNotes :\n";
+    for (int i = 0; i < melody.size(); ++i) {
+        cout << "Channel " << i + 1 << ":\n";
+        for (auto j: melody[i])
+            cout << "(" << j.freq << " - " << j.dur << ") ";
+        cout << '\n';
+    }
+    cout << '\n';
 
 
 }
@@ -196,18 +262,21 @@ int main() {
 
     SetConsoleCP(1251);
     SetConsoleOutputCP(1251);
-    double step=pow(2,1.0/12.0);
-    freq[57]=440;
-    for (int i=58;i<57+12;++i)
-        freq[i]=freq[i-1]*step;
-    for (int i=57+12;i<128;++i)
-        freq[i]=freq[i-12]*2;
-    for (int i=56;i>=0;--i)
-        freq[i]=freq[i+12]/2;
+    double step = pow(2, 1.0 / 12.0);
+    freq[57] = 440;
+    for (int i = 58; i < 57 + 12; ++i)
+        freq[i] = freq[i - 1] * step;
+    for (int i = 57 + 12; i < 128; ++i)
+        freq[i] = freq[i - 12] * 2;
+    for (int i = 56; i >= 0; --i)
+        freq[i] = freq[i + 12] / 2;
 
 
     //loadMidi("test1.mid");
-    loadMidi("D:\\Programming\\VS_CPP\\RandomThings\\midiReader\\test2.mid");
+
+    loadMidi("D:\\Programming\\VS_CPP\\RandomThings\\midiReader\\test4_btt.mid");
+    //speedUpMelody(0.5);
+    saveMelody("D:\\Programming\\VS_CPP\\RandomThings\\midiReader\\test4_out.txt", 1);
 
 
     return 0;
